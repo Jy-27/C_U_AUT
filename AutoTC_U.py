@@ -506,29 +506,12 @@ async def updater_1(instance):
         await asyncio.sleep(60*60*4)
 
 async def updater_2(instance, check_instance, interval :int=15):
-    # print(sys._getframe().f_lineno)
-    startTime = datetime.datetime.now()
-    # print(sys._getframe().f_lineno)
     while True:
-        if await check_instance.get_data(type='target') is not None:
-            for minute in itertools.count(start=0, step=interval):
-                # print(minute)
-                # print(sys._getframe().f_lineno)
-                deltaTime = startTime + datetime.timedelta(minutes=minute)
-                # print(sys._getframe().f_lineno)
-                lastTime = datetime.datetime.now()
-                # print(sys._getframe().f_lineno)
-                # print(sys._getframe().f_lineno)
-                while lastTime <= deltaTime:
-                    # print(sys._getframe().f_lineno)
-                    lastTime = datetime.datetime.now()
-                    # print(sys._getframe().f_lineno)
-                    # print(sys._getframe().f_lineno)
-                    await asyncio.sleep(60)
-                    # print(sys._getframe().f_lineno)
-                await instance.update()
-                await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        target_data = await check_instance.get_data(type='target')
+        if target_data is not None:
+            await instance.update()
+        await asyncio.sleep(30)
+   
 
 async def monitoring(updater_ticker, updater_ohlcv, queue, interval :int=2):
     storage = {}
