@@ -510,7 +510,7 @@ async def updater_2(instance, check_instance, interval :int=15):
         target_data = await check_instance.get_data(type='target')
         if target_data is not None:
             await instance.update()
-        await asyncio.sleep(30)
+        await asyncio.sleep(60*interval)
    
 
 async def monitoring(updater_ticker, updater_ohlcv, queue, interval :int=2):
