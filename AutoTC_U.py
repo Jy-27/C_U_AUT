@@ -7,10 +7,10 @@ import datetime
 import os
 import asyncio
 import sys
-import itertools
+import pprint
 import ccxt # type: ignore
 import websocket
-# print(sys._getframe().f_lineno)
+print(sys._getframe().f_lineno)
 # pd.set_option('dispaly.max_row, 100')
 
 def Trade_data(ticker :str, amount :float, tradeType :str):
@@ -116,20 +116,24 @@ class Data_Storage:
             else:
                 self.storage.append(dataFilter)
 
-    async def get_data(self, interval: int = 60):
+    async def get_data(self, interval=60):
         timestamp_min = (datetime.datetime.now().timestamp() * 1_000) - (60_000 * interval)
-        async with self.lock:
-            index_data = [data for data in self.storage if data['trade_timestamp'] > timestamp_min]
-            self.storage = index_data.copy()
-            index_data.clear()
+        # async with self.lock:
+        index_data = [data for data in self.storage if data['trade_timestamp'] > timestamp_min]
+        self.storage = index_data.copy()
+        index_data.clear()
 
         return self.storage
 
 class analysis:
     def __init__(self, websocket_data):
         self.websocket_data = websocket_data
+        pprint.pprint(self.realtime_data)
         self.realtime_data = None
+        pprint.pprint(self.realtime_data)
         self.ohlcv = pu.get_ohlcv(ticker=websocket_data['code'], interval='minute15', count=48)
+        pprint.pprint(self.realtime_data)
+        
 
     async def data_processing(self, interval :int=5, count :int=3):
         default = {'open':None,
@@ -151,13 +155,13 @@ class analysis:
                    'execution_speed_bid':None,
                    'execution_speed_ask':None} 
         data_dict = {n: default.copy() for n in range(count)}
-
+        print(sys._getframe().f_lineno)
         timestamp_now = datetime.datetime.now().timestamp() * 1_000
         timestamp_line = []
-
+        print(sys._getframe().f_lineno)
         for n_A in range(count+1):
             timestamp_line.append(timestamp_now - (60_000 * n_A * interval))
-
+        print(sys._getframe().f_lineno)
         for n_B in range(count):
             max_timestamp = timestamp_line[n_B]
             min_timestamp = timestamp_line[n_B+1]
@@ -195,11 +199,13 @@ class analysis:
         self.realtime_data = data_dict
 
     async def case_1_UL(self):
+        print(sys._getframe().f_lineno)
         await self.data_processing(interval=5, count=6)
-        value_min = 200_000_000
+        value_min = 500_000_000
         data_count = len(self.realtime_data.keys())
         data_keys = list(self.realtime_data.keys())
         whileEXIT = False
+        pprint.pprint(self.realtime_data)
 
         n = 0
         while not whileEXIT:
@@ -229,19 +235,20 @@ class analysis:
 
 
     async def case_2_UL(self):
-        await self.data_processing(interval=1, count=5)
-        if self.realtime_data[2]['open'] is not None:
+        print(sys._getframe().f_lineno)
+        await self.data_processing(interval=1, count=3)
+        if self.realtime_data[count-1]['open'] is not None:
             timeNow = datetime.datetime.now()
             timedelta = timeNow - datetime.timedelta(hours=6)            
-            trade_speed_min = float(0.7)
-            trade_value_min = 100_000_000
+            trade_speed_min = float(1)
+            trade_value_min = 200_000_000
 
             trade_value_ = self.realtime_data[0]['value_bid'] > trade_value_min
             trade_speed_ = self.realtime_data[0]['execution_speed_bid'] <= trade_speed_min
             open_close_now_ = self.realtime_data[0]['open'] < self.realtime_data[0]['close']
             value_high_bid_ask = self.realtime_data[0]['V_bid_high_price'] > self.realtime_data[0]['V_ask_high_price']
             trade_later_data = self.realtime_data[0]['close'] > self.realtime_data[1]['close'] > self.realtime_data[2]['close']
-            trade_price_max_ = max(self.ohlcv[self.ohlcv.index >= timedelta][:-1]['close']) < self.realtime_data[0]['close']
+            trade_price_max_ = max(self.ohlcv[self.ohlcv.index >= timedelta][:-1]['close']) < self.websocket_data['trade_price']
 
             all_bool = [trade_value_, trade_speed_, open_close_now_, value_high_bid_ask, trade_later_data, trade_price_max_]
 
@@ -249,7 +256,7 @@ class analysis:
                 return True
             else:
                 return False
-
+            
 class close_posision_price:
     """거래('long' or 'short')발생시 거래내역 정보를 저장하고 손절 or 익절 목표 단가를 반환한다."""
     
@@ -494,17 +501,26 @@ async def monitoring(updater_ticker, queue, interval :int=2):
                     pass
                 if data['code'] not in storage.keys():
                     storage[data['code']] = Data_Storage()
+                    print(storage[data['code']])
                 await storage[data['code']].data_update(data)
                 queue.task_done()
                 # await asyncio.sleep(0)    <<불필요하다. 이유는 await queue.get()에서 이미 비동기식으로 움직이고 있기 때문이다.
                 # print(f'현재 11줄 번호 >>> {sys._getframe().f_lineno}')
             await asyncio.sleep(0)
             for ticker in tickers_target:
-                try:
+                if ticker in storage.keys():
+                    print(sys._getframe().f_lineno)
+                    print(sys._getframe().f_lineno)
+                    print(sys._getframe().f_lineno)
+                    # try:
+                    print(ticker)
                     get_data = await storage[ticker].get_data()
+                    print(get_data)
+                    print(sys._getframe().f_lineno)
                     analysys_ = analysis(websocket_data=get_data)
-                    
+                    print(sys._getframe().f_lineno)
                     case_1_check = await analysys_.case_1_UL()
+                    print(sys._getframe().f_lineno)
                     case_2_check = await analysys_.case_2_UL()
 
                     check = [case_1_check, case_2_check]
@@ -513,9 +529,9 @@ async def monitoring(updater_ticker, queue, interval :int=2):
                         await MarketOrder(ticker=ticker).Buy_order()
                     # print(sys._getframe().f_lineno)
                     await asyncio.sleep(0)
-                except:
-                    pass
-
+                    # except:
+                    #     pass
+        print(sys._getframe().f_lineno)
         await asyncio.sleep(interval)
 
 async def main():
