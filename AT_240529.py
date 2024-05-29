@@ -164,6 +164,12 @@ class PositionStopper:
         """
         del cls.position_info[ticker]
 
+import threading
+from collections import deque
+from typing import Deque
+import os
+import asyncio
+
 class DataSaver:
     """
     Note.
@@ -173,69 +179,41 @@ class DataSaver:
     def __init__(self, maxlen :int = 5_000):
         self.deque:Deque[list] = deque(maxlen=maxlen)
         self.maxlen = maxlen
-        self.timestamp_start = None
-        self.timestamp_end = None
         self.edited_data = None
         self.classname = self.__class__.__name__
-        self.lock = threading.Lock()
 
     async def process(self, deque):
         if deque:
-            # print(deque)
-            print(f'{self.classname} :: {sys._getframe().f_lineno}')
             for _ in range(len(deque)):
-                # print('here')
-                print(f'{self.classname} :: {sys._getframe().f_lineno}')
+                # with self.lock:
                 popLeft = deque.popleft()
-                print(popLeft)
                 edited_data = await edit_data(popLeft)
-                print(edited_data)
-                print(f'{self.classname} :: {sys._getframe().f_lineno}')
                 if self.deque:
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
                     index_last_data = self.deque[-1].copy()
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
                     check_timestamp = edited_data['trade_timestamp'] == index_last_data['trade_timestamp']
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
                     check_price = edited_data['trade_price'] == index_last_data['trade_price']
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
 
                     if all([check_timestamp, check_price]):
-                        print(f'{self.classname} :: {sys._getframe().f_lineno}')
                         self.deque.pop()
-                        print(f'{self.classname} :: {sys._getframe().f_lineno}')
                         index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
                                                 'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
                                                 'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
                                                 'count_bid' : edited_data['count_bid'] + index_last_data['count_bid']})
-                        print(f'{self.classname} :: {sys._getframe().f_lineno}')
                         self.deque.append(index_last_data)
-                        print(self.deque[-1])
-                        print(f'{self.classname} :: {sys._getframe().f_lineno}')
                     else:
-                        print(f'{self.classname} :: {sys._getframe().f_lineno}')
                         self.deque.append(edited_data)
                 else:
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
                     self.deque.append(edited_data)
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
-                    self.timestamp_start = edited_data['trade_timestamp']
-                    print(f'{self.classname} :: {sys._getframe().f_lineno}')
 
         if len(self.deque) >= self.maxlen:
-            print(f'{self.classname} :: {sys._getframe().f_lineno}')
             directory_ = os.path.join(os.path.dirname(os.getcwd()), 'DataBase', self.deque[0]['code'])
-            print(f'{self.classname} :: {sys._getframe().f_lineno}')
             file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
-            print(f'{self.classname} :: {sys._getframe().f_lineno}')
             if not os.path.exists(directory_):
                 os.makedirs(directory_)
             path_ = os.path.join(directory_, file_)
-            print(f'{self.classname} :: {sys._getframe().f_lineno}')
-            with self.lock:
-                await save_to_file(data=list(self.deque), path=path_)
-                self.deque.clear()
-            print(f'{self.classname} :: {sys._getframe().f_lineno}')
+            await save_to_file(data=list(self.deque), path=path_)
+            self.deque.clear()
+
 
 
 import threading
@@ -420,7 +398,7 @@ async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, tim
         timeNow = datetime.datetime.now()
         timeDelta = datetime.timedelta(hours=2)
         whileExit = timeNow + timeDelta
-        print(f'{sys._getframe().f_lineno}')
+        # print(f'{sys._getframe().f_lineno}')
 
         while timeNow <= whileExit:
             while not queue.empty():
@@ -433,11 +411,10 @@ async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, tim
                     await saver_[ticker].process(deque=deque_[ticker])
                     # await (saver_[ticker]).process(deque_[ticker])
                     # cls.saver_[code].process(data=cls.deque_[code])
-                    print('tt')
                     # await cls.saver_[code].process(data=cls.deque_[code])
                     # .process(data=cls.deque_[code])
                     # .process(data=cls.deque_[code])
-                    print(f'{sys._getframe().f_lineno}')
+                    # print(f'{sys._getframe().f_lineno}')
                     await asyncio.sleep(0)
 
                 #// TEST ZONE START
