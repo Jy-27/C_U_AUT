@@ -177,15 +177,15 @@ class DataSaver:
          버퍼역할을 추가하고 다시 테스트 해볼필요가 있다.
     """
     def __init__(self, maxlen :int = 5_000):
-        self.deque:Deque[list] = deque(maxlen=maxlen)
+        self.deque:Deque[list] = deque()
         self.maxlen = maxlen
         self.edited_data = None
         self.classname = self.__class__.__name__
+        self.lock = asyncio.Lock()
 
     async def process(self, deque):
-        if deque:
-            for _ in range(len(deque)):
-                # with self.lock:
+        async with self.lock:
+            while deque:
                 popLeft = deque.popleft()
                 edited_data = await edit_data(popLeft)
                 if self.deque:
@@ -194,7 +194,7 @@ class DataSaver:
                     check_price = edited_data['trade_price'] == index_last_data['trade_price']
 
                     if all([check_timestamp, check_price]):
-                        self.deque.pop()
+                        self.deque.pop() 
                         index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
                                                 'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
                                                 'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
@@ -205,58 +205,15 @@ class DataSaver:
                 else:
                     self.deque.append(edited_data)
 
-        if len(self.deque) >= self.maxlen:
-            directory_ = os.path.join(os.path.dirname(os.getcwd()), 'DataBase', self.deque[0]['code'])
-            file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
-            if not os.path.exists(directory_):
-                os.makedirs(directory_)
-            path_ = os.path.join(directory_, file_)
-            await save_to_file(data=list(self.deque), path=path_)
-            self.deque.clear()
-
-
-
-import threading
-from collections import deque
-
-
-class WebSocketDataHandler:
-    def __init__(self, max_size, save_func):
-        self.deque = deque()
-        self.max_size = max_size
-        self.save_func = save_func
-        self.lock = threading.Lock()
-
-    def add_data(self, data):
-        with self.lock:
-            self.deque.append(data)
-            if len(self.deque) >= self.max_size:
-                self.save_data()
-
-    def save_data(self):
-        with self.lock:
-            data_to_save = list(self.deque)
-            self.deque.clear()
-        self.save_func(data_to_save)
-
-    def get_data(self):
-        with self.lock:
-            return list(self.deque)
-
-
-def save_to_hard_storage(data):
-    # 하드 저장 구현
-    pass
-
-
-# 예제 사용
-handler = WebSocketDataHandler(max_size=100, save_func=save_to_hard_storage)
-
-
-# 웹소켓으로부터 데이터 수신
-def on_websocket_message(data):
-    handler.add_data(data)
-
+                if len(self.deque) >= self.maxlen:
+                    directory_ = os.path.join(os.path.dirname(os.getcwd()), 'DataBase', self.deque[0]['code'])
+                    file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
+                    if not os.path.exists(directory_):
+                        os.makedirs(directory_)
+                    path_ = os.path.join(directory_, file_)
+                    await save_to_file(data=list(self.deque), path=path_)
+                    self.deque.clear()
+            # await asyncio.sleep(0) 
 
 class DataLoader:
     def __init__(self, ticker :str, start :int=7):
@@ -576,7 +533,7 @@ async def websocket(queue, restartRange :int=4):#updater, queue, hour :int=2, da
         await asyncio.sleep(0)
 
 async def main():
-    MAXLEN_SAVE = 10
+    MAXLEN_SAVE = 1_000
     MAXLEN_MERGE = 10_000
     # print(MAXLEN_)
     q_ = asyncio.Queue()
