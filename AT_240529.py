@@ -177,6 +177,7 @@ class DataSaver:
         self.timestamp_end = None
         self.edited_data = None
         self.classname = self.__class__.__name__
+        self.lock = threading.Lock()
 
     async def process(self, deque):
         if deque:
@@ -231,9 +232,53 @@ class DataSaver:
                 os.makedirs(directory_)
             path_ = os.path.join(directory_, file_)
             print(f'{self.classname} :: {sys._getframe().f_lineno}')
-            await save_to_file(data=list(self.deque), path=path_)
+            with self.lock:
+                await save_to_file(data=list(self.deque), path=path_)
+                self.deque.clear()
             print(f'{self.classname} :: {sys._getframe().f_lineno}')
+
+
+import threading
+from collections import deque
+
+
+class WebSocketDataHandler:
+    def __init__(self, max_size, save_func):
+        self.deque = deque()
+        self.max_size = max_size
+        self.save_func = save_func
+        self.lock = threading.Lock()
+
+    def add_data(self, data):
+        with self.lock:
+            self.deque.append(data)
+            if len(self.deque) >= self.max_size:
+                self.save_data()
+
+    def save_data(self):
+        with self.lock:
+            data_to_save = list(self.deque)
             self.deque.clear()
+        self.save_func(data_to_save)
+
+    def get_data(self):
+        with self.lock:
+            return list(self.deque)
+
+
+def save_to_hard_storage(data):
+    # 하드 저장 구현
+    pass
+
+
+# 예제 사용
+handler = WebSocketDataHandler(max_size=100, save_func=save_to_hard_storage)
+
+
+# 웹소켓으로부터 데이터 수신
+def on_websocket_message(data):
+    handler.add_data(data)
+
 
 class DataLoader:
     def __init__(self, ticker :str, start :int=7):
