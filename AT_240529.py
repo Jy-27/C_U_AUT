@@ -511,7 +511,7 @@ class MarketOrder:
 #     def case_1(self):
 
 
-async def websocket(queue, restartRange :int=4):#updater, queue, hour :int=2, dataType :str='trade'):
+async def websocket(queue, restartRange :int=12):#updater, queue, hour :int=2, dataType :str='trade'):
     while True:
         TimeNow = datetime.datetime.now()
         WhileEXIT = (TimeNow + datetime.timedelta(hours=restartRange)).timestamp() * 1_000
@@ -526,6 +526,7 @@ async def websocket(queue, restartRange :int=4):#updater, queue, hour :int=2, da
                 stop_timestamp = float(data_t['trade_timestamp'])
                 await asyncio.sleep(0)
             except:
+                print(f'(Error - {data_t})')
                 pass
         WM_T.terminate()
         time_ = datetime.datetime.now()
