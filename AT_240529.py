@@ -7,20 +7,9 @@ import datetime
 import asyncio
 import sys
 import pytz
+import threading
 from collections import deque, defaultdict
 from typing import Deque
-# import logging
-#
-# # 로그 레벨 설정
-# logging.basicConfig(level=logging.DEBUG)
-#
-# # 예제 코드
-# logging.debug("디버그 메시지")
-# logging.info("정보 메시지")
-# logging.warning("경고 메시지")
-# logging.error("오류 메시지")
-# logging.critical("심각한 오류 메시지")
-
 
 
 def get_api_key(market :str='upbit'):
@@ -33,7 +22,7 @@ def get_api_key(market :str='upbit'):
         api_key = json.load(file)
         return api_key
 
-async def ohlc(editData, interval: int = 1):
+def ohlc(editData, interval: int = 1):
     df_ = pd.DataFrame(editData)
     df_['date'] = pd.to_datetime(df_['trade_timestamp'], unit='ms', utc=True).dt.tz_convert(pytz.timezone('Asia/Seoul'))
     df_.set_index('date', inplace=True)
@@ -48,22 +37,19 @@ async def ohlc(editData, interval: int = 1):
     ohlc.columns = [col[1] for col in ohlc.columns.values]
     return ohlc
 
-async def edit_data(data):
+def edit_data(data):
     edited_data = {
-        'code'           : str(data['code']),
-        'trade_timestamp': float(data['trade_timestamp']),
-        'trade_price'    : float(data['trade_price']),
-        'volume_ask'     : float(data['trade_volume'] if data['ask_bid'] == 'ASK' else 0),
-        'volume_bid'     : float(data['trade_volume'] if data['ask_bid'] == 'BID' else 0),
-        'count_ask'      : int(1 if data['ask_bid'] == 'ASK' else 0),
-        'count_bid'      : int(1 if data['ask_bid'] == 'BID' else 0),
-        'seller'         : int(1 if data['ask_bid'] == 'ASK' else 0),
-        'buyer'          : int(1 if data['ask_bid'] == 'BID' else 0)}
+        'code':str(data['code']),
+        'trade_timestamp':float(data['trade_timestamp']),
+        'trade_price':float(data['trade_price']),
+        'volume_ask':float(data['trade_volume'] if data['ask_bid'] == 'ASK' else 0),
+        'volume_bid':float(data['trade_volume'] if data['ask_bid'] == 'BID' else 0),
+        'count_ask':int(1 if data['ask_bid'] == 'ASK' else 0),
+        'count_bid':int(1 if data['ask_bid'] == 'BID' else 0),
+        'seller':int(1 if data['ask_bid'] == 'ASK' else 0),
+        'buyer':int(1 if data['ask_bid'] == 'BID' else 0)}
     return edited_data
 
-async def save_to_file(data, path):
-    with open(path, "w", encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
 
 #============================================================================
 
@@ -86,7 +72,7 @@ class PositionStopper:
             self.reference_price.update(initial_dict)
 
     @classmethod
-    async def trade_order_type(cls, open_position_info :dict):
+    def trade_order_type(cls, open_position_info :dict):
         """
         1. open_position_info 입력예시
             open_position_info = {'code':ticker,
@@ -106,7 +92,7 @@ class PositionStopper:
 
     @classmethod
     #수신된 최종 거래금액을 기존 등록된 금액과 비교 후 max값을 저장한다. order_type에 해당 Ticker가 보유시에만 업데이트 된다.
-    async def data_update(cls, trade_price :dict):
+    def data_update(cls, trade_price :dict):
         """
         1. trade_price 입력예시 : {'KRW-BTC':85_000_000}
         2. 용도 및 목적 : cls.reference_price의 최종 정보를 update 한다.
@@ -137,7 +123,7 @@ class PositionStopper:
         """
 
     @classmethod
-    async def target_price(cls, ticker, percent :float=0.012):
+    def target_price(cls, ticker, percent :float=0.012):
         """
         1. 입력 예시
             1) ticker = 'KRW-BTC'
@@ -164,12 +150,6 @@ class PositionStopper:
         """
         del cls.position_info[ticker]
 
-import threading
-from collections import deque
-from typing import Deque
-import os
-import asyncio
-
 class DataSaver:
     """
     Note.
@@ -181,39 +161,44 @@ class DataSaver:
         self.maxlen = maxlen
         self.edited_data = None
         self.classname = self.__class__.__name__
-        self.lock = asyncio.Lock()
+        self.lock = threading.Lock()
 
-    async def process(self, deque):
-        async with self.lock:
-            while deque:
-                popLeft = deque.popleft()
-                edited_data = await edit_data(popLeft)
-                if self.deque:
-                    index_last_data = self.deque[-1].copy()
-                    check_timestamp = edited_data['trade_timestamp'] == index_last_data['trade_timestamp']
-                    check_price = edited_data['trade_price'] == index_last_data['trade_price']
+    def AddData(self, deque):
+        while deque:
+            popLeft = deque.popleft()
+            edited_data = edit_data(popLeft)
+            if self.deque:
+                index_last_data = self.deque[-1].copy()
+                check_timestamp = edited_data['trade_timestamp'] == index_last_data['trade_timestamp']
+                check_price = edited_data['trade_price'] == index_last_data['trade_price']
 
-                    if all([check_timestamp, check_price]):
-                        self.deque.pop() 
-                        index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
-                                                'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
-                                                'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
-                                                'count_bid' : edited_data['count_bid'] + index_last_data['count_bid']})
-                        self.deque.append(index_last_data)
-                    else:
-                        self.deque.append(edited_data)
+                if all([check_timestamp, check_price]):
+                    self.deque.pop() 
+                    index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
+                                            'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
+                                            'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
+                                            'count_bid' : edited_data['count_bid'] + index_last_data['count_bid']})
+                    self.deque.append(index_last_data)
                 else:
                     self.deque.append(edited_data)
+            else:
+                self.deque.append(edited_data)
 
-                if len(self.deque) >= self.maxlen:
-                    directory_ = os.path.join(os.path.dirname(os.getcwd()), 'DataBase', self.deque[0]['code'])
-                    file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
-                    if not os.path.exists(directory_):
-                        os.makedirs(directory_)
-                    path_ = os.path.join(directory_, file_)
-                    await save_to_file(data=list(self.deque), path=path_)
-                    self.deque.clear()
-            # await asyncio.sleep(0) 
+        if len(self.deque) >= self.maxlen:
+            self.SaveData()
+    
+    def SaveData(self):
+        directory_ = os.path.join(os.path.dirname(os.getcwd()),
+                                  'DataBase',
+                                  self.deque[0]['code'])
+        file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
+        if not os.path.exists(directory_):
+            os.makedirs(directory_)
+        path_ = os.path.join(directory_, file_)
+        with self.lock:
+            with open(path_, "w", encoding='utf-8') as f:
+                json.dump(list(self.deque), f, ensure_ascii=False, indent=4)
+            self.deque.clear()
 
 class DataLoader:
     def __init__(self, ticker :str, start :int=7):
@@ -241,7 +226,7 @@ class DataLoader:
         finally:
             return paths_
 
-    def load(self):
+    def LoadData(self):
         paths = self.paths()
         load = []
         if paths:
@@ -255,14 +240,14 @@ class DataMerge:
         self.mergeData = Deque(maxlen=maxlen)
         self.classname = self.__class__.__name__
 
-    async def AddLoadData(self, loadData):
+    def AddLoadData(self, loadData):
         if loadData:
             self.mergeData.extend(loadData)
         else:
             pass
 
-    async def AddRealtimeData(self, realtimeData):
-        edited_data = await edit_data(data=realtimeData)
+    def AddRealtimeData(self, realtimeData):
+        edited_data = edit_data(data=realtimeData)
         if not self.mergeData:
             self.mergeData.append(edited_data)
 
@@ -280,65 +265,8 @@ class DataMerge:
             else:
                 self.mergeData.append(edited_data)
 
-    async def GetData(self):
+    def GetData(self):
         return list(self.mergeData)
-
-#수정 전 원본
-# class DataManager:
-#     saver_ = {}
-#     merge_ = {}
-#     deque_ = deque()
-#     classname_ = None
-
-#     @classmethod
-#     async def process(cls, queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, timeSleep :int=5):
-#         cls.classname_ = cls.__name__
-#         while True:
-#             tickers = pu.get_tickers('KRW')
-#             print(f'{cls.classname_} :: {sys._getframe().f_lineno}')
-#             for ticker in tickers:
-#                 print(f'{cls.classname_} :: {sys._getframe().f_lineno}')
-#                 load_data = DataLoader(ticker).load()
-#                 if ticker not in cls.saver_.keys():
-#                     saver_[ticker] = DataSaver(maxlen=SaveMaxlen)
-#                 #     cls.merge_[ticker] = DataMerge(maxlen=MergeMaxlen)
-#                 # await cls.merge_[ticker].AddLoadData(loadData=load_data)
-#                 timeNow = datetime.datetime.now()
-#                 timeDelta = datetime.timedelta(hours=2)
-#                 whileExit = timeNow + timeDelta
-
-#                 while timeNow <= whileExit:
-#                     timeNow = datetime.datetime.now()
-#                     while not queue.empty():
-#                         print(f'{cls.classname_} :: {sys._getframe().f_lineno}')
-#                         q_data = await queue.get()
-#                         code = q_data['code']
-#                         cls.deque_.append(q_data)
-#                         # await cls.merge_[code].AddRealtimeData(realtimeData=q_data)
-#                         print(f'{cls.classname_} :: {sys._getframe().f_lineno}')
-#                         await cls.saver_[code].process(data=cls.deque_)
-#                     await asyncio.sleep(0)
-
-#                     #// TEST ZONE START
-#                     # for ticker in tickers:
-#                     #     data = await cls.merge_[ticker].GetData()
-#                     #     if data:
-#                     #         df_ = await ohlc(editData=data, interval=1)
-#                     #         print(ticker)
-#                     #         print(df_)
-#                     #     else:
-#                     #         print('data가 없습니다')
-#                     #// TEST ZONE END
-#                     await asyncio.sleep(timeSleep)
-
-#     @classmethod
-#     async def GetData(cls, code):
-#         cls.classname_ = cls.__name__
-#         if code in cls.merge_.keys():
-#             return await cls.merge_[code].GetData()
-#         else:
-#             return None
-#=============================================================================================
 
 async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, timeSleep :int=5):
     saver_ = {}
@@ -347,7 +275,6 @@ async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, tim
     while True:
         tickers = pu.get_tickers('KRW')
         for ticker in tickers:
-            # print(ticker)
             if ticker not in saver_.keys():
                 saver_[ticker] = DataSaver(maxlen=SaveMaxlen)
                 merge_[ticker] = DataMerge(maxlen=MergeMaxlen)
@@ -365,7 +292,7 @@ async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, tim
                     deque_[ticker].append(q_data)
                     # await self.merge_[code].AddRealtimeData(realtimeData=q_data)
 
-                    await saver_[ticker].process(deque=deque_[ticker])
+                    saver_[ticker].AddData(deque=deque_[ticker])
                     # await (saver_[ticker]).process(deque_[ticker])
                     # cls.saver_[code].process(data=cls.deque_[code])
                     # await cls.saver_[code].process(data=cls.deque_[code])
@@ -469,7 +396,7 @@ class MarketOrder:
             amount = self.MIN_TRADE_AMOUNT
         return int(amount)
 
-    async def Buy_order(self) -> int:
+    def Buy_order(self) -> int:
         amount = self.Get_MinAmount()
 
         if amount > 0 and self.ticker not in self.Get_HoldingTickers():
@@ -478,7 +405,7 @@ class MarketOrder:
                 position = {'code':self.ticker,
                             'market':'upbit',
                             'position':'long'}
-                await close_posision_price.trade_order_type(open_position_info=position)
+                close_posision_price.trade_order_type(open_position_info=position)
                 Trade_data(ticker=self.ticker, amount=amount, tradeType='BUY')
                 print(f'Order completed (Buy) : {self.ticker}')
             except EOFError as e:
@@ -486,7 +413,7 @@ class MarketOrder:
         else:
             print(f'Order fail (Buy) : {self.ticker}')
 
-    async def Sell_order(self) -> int:
+    def Sell_order(self) -> int:
         Balance_ = self.Get_Balances()
         index = next((index for index, Balance_ in enumerate(Balance_) if Balance_['code'] == self.ticker), None)
         amount = Balance_[index]['volume']
@@ -495,7 +422,7 @@ class MarketOrder:
                 before_selling_KRW_ = int(upbit.get_balance('KRW'))
                 upbit.sell_market_order(self.ticker, amount)
                 after_selling_KRW_ = int(upbit.get_balance('KRW'))
-                await close_posision_price.remove_ticker(self.ticker)
+                close_posision_price.remove_ticker(self.ticker)
                 sell_value = after_selling_KRW_ - before_selling_KRW_
                 Trade_data(ticker=self.ticker, amount=sell_value, tradeType='SELL')
                 print(f'Order complete (Sell): {self.ticker}')
@@ -503,13 +430,6 @@ class MarketOrder:
                 print(e)
         else:
             print(f'Order fail (Sell): {self.ticker}')
-
-# class Analysis:
-#     def __init__ (self, mergeData):
-#         self.mergeData = mergeData
-
-#     def case_1(self):
-
 
 async def websocket(queue, restartRange :int=12):#updater, queue, hour :int=2, dataType :str='trade'):
     while True:
@@ -525,7 +445,8 @@ async def websocket(queue, restartRange :int=12):#updater, queue, hour :int=2, d
                 await queue.put(data_t)
                 stop_timestamp = float(data_t['trade_timestamp'])
                 await asyncio.sleep(0)
-            except:
+            except Exception as e:
+                print(f'(Error - {e})')
                 print(f'(Error - {data_t})')
                 pass
         WM_T.terminate()
@@ -534,7 +455,7 @@ async def websocket(queue, restartRange :int=12):#updater, queue, hour :int=2, d
         await asyncio.sleep(0)
 
 async def main():
-    MAXLEN_SAVE = 1_000
+    MAXLEN_SAVE = 20
     MAXLEN_MERGE = 10_000
     # print(MAXLEN_)
     q_ = asyncio.Queue()
