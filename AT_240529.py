@@ -158,10 +158,11 @@ class DataSaver:
     """
     def __init__(self, maxlen :int = 5_000):
         self.deque_inside = deque()
+        self.deque_save = deque()
         self.maxlen = maxlen
         self.edited_data = None
         self.classname = self.__class__.__name__
-        self.lock = threading.Lock()
+        # self.lock = asyncio.Lock
 
     async def Append(self, queue_input):
         while not queue_input.empty():
@@ -183,11 +184,12 @@ class DataSaver:
                     self.deque_inside.append(edited_data)
             else:
                 self.deque_inside.append(edited_data)
+            await asyncio.sleep(0)
 
         if len(self.deque_inside) >= self.maxlen:
-            self.Dump()
+            await self.Dump()
     
-    def Dump(self):
+    async def Dump(self):
         directory_ = os.path.join(os.path.dirname(os.getcwd()),
                                   'DataBase',
                                   self.deque_inside[0]['code'])
@@ -195,12 +197,13 @@ class DataSaver:
         if not os.path.exists(directory_):
             os.makedirs(directory_)
         path_ = os.path.join(directory_, file_)
+        for _ in range(len(self.deque_inside)):
+            popLeft = self.deque_inside.popleft()
+            self.deque_save.append(popLeft)
+            await asyncio.sleep(0)
         with open(path_, "w", encoding='utf-8') as f:
-            json.dump(list(self.deque_inside), f, ensure_ascii=False, indent=4)
-        with self.lock:
-            for _ in range(len(self.deque_inside)):
-                self.deque_inside.pop()
-            print(self.deque_inside)
+            json.dump(list(self.deque_save), f, ensure_ascii=False, indent=4)
+        self.deque_save.clear()
 
 class DataLoader:
     def __init__(self, ticker :str, start :int=7):
@@ -448,7 +451,7 @@ async def websocket(queue, restartRange :int=12):#updater, queue, hour :int=2, d
             WM_T = pu.WebSocketManager(type='trade', codes=tickers_all)
 
 async def main():
-    MAXLEN_SAVE = 20
+    MAXLEN_SAVE = 10
     MAXLEN_MERGE = 10_000
     # print(MAXLEN_)
     q_ = asyncio.Queue()

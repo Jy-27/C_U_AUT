@@ -1,102 +1,95 @@
+#%%
+
+
 import pandas as pd
-import json
-import os
 import pyupbit as pu
+import os
 import datetime
-import asyncio
-import sys
+import json
 import pytz
-from collections import deque, defaultdict
-from typing import Deque
-
-class DataSaver:
-    """
-    Note.
-      1. 버퍼역할을 하는 deque 또는 queue가 없이 사용시 DataSaver class 실행시 일부 데이터 누락이 발생했다.
-         버퍼역할을 추가하고 다시 테스트 해볼필요가 있다.
-    """
-    def __init__(self, maxlen :int = 5_000):
-        self.deque:Deque[list] = deque()
-        self.maxlen = maxlen
-        self.edited_data = None
+import time
+class DataLoader:
+    def __init__(self, ticker :str, start :int=7):
+        self.ticker = ticker
+        self.start = start
+        self.directory = os.path.join(os.path.dirname(os.getcwd()),
+                                      'DataBase',
+                                      ticker)
+        self.loadData = None
         self.classname = self.__class__.__name__
-        self.lock = asyncio.Lock()
+    def paths(self):
+        paths_ = []
+        try:
+            if os.path.exists(self.directory):
+                timeNow = datetime.datetime.now()
+                timeDelta = datetime.timedelta(days=self.start)
+                timestart = str((timeNow - timeDelta).timestamp() * 1_000) + '.json'
 
-    def AddData(self, deque):
-        while deque:
-            popLeft = deque.popleft()
-            edited_data = await edit_data(popLeft)
-            if self.deque:
-                index_last_data = self.deque[-1].copy()
-                check_timestamp = edited_data['trade_timestamp'] == index_last_data['trade_timestamp']
-                check_price = edited_data['trade_price'] == index_last_data['trade_price']
+                files = [file for file in os.listdir(self.directory) if file.endswith('.json')]
+                if files:
+                    for target_file in files:
+                        if timestart <= target_file:
+                            path = os.path.join(self.directory, target_file)
+                            paths_.append(path)
+        finally:
+            return paths_
 
-                if all([check_timestamp, check_price]):
-                    self.deque.pop() 
-                    index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
-                                            'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
-                                            'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
-                                            'count_bid' : edited_data['count_bid'] + index_last_data['count_bid']})
-                    self.deque.append(index_last_data)
-                else:
-                    self.deque.append(edited_data)
-            else:
-                self.deque.append(edited_data)
+    def Load(self):
+        paths = self.paths()
+        load = []
+        if paths:
+            for path in paths:
+                with open(path, 'r', encoding='utf-8')as file:
+                    load += json.load(file)
+        return load
 
-        if len(self.deque) >= self.maxlen:
-            self.SaveData()
-    
-    def SaveData(self):
-        directory_ = os.path.join(os.path.dirname(os.getcwd()), 'DataBase', self.deque[0]['code'])
-        file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
-        if not os.path.exists(directory_):
-            os.makedirs(directory_)
-        path_ = os.path.join(directory_, file_)
-        with self.lock:
-            save_to_file(data=list(self.deque), path=path_)
-            self.deque.clear()
-
-async def websocket(deque):
-    tickers_all = pu.get_tickers('KRW')
-    WM_T = pu.WebSocketManager(type='trade', codes=tickers_all)
-    while True:
-        data = WM_T.get()
-        # print(data)
-        await deque.put(data)
-        await asyncio.sleep(0)
-
-async def play(deque):
-    while True:
-        while deque:
-            data = await deque.get()
-            print(data)
-            await asyncio.sleep(0)
-        print('end')
-        await asyncio.sleep(10)
-
-async def main():
-    # deque_ = LockedDeque()
-    deque_ = asyncio.Queue()
-
-    websocket_task = asyncio.create_task(websocket(deque=deque_))
-    play_task = asyncio.create_task(play(deque = deque_))
-
-    await asyncio.gather(websocket_task,
-                         play_task)
-
-LockedDeque()
-if __name__ == "__main__":
-    time_ = datetime.datetime.now()
-    print(time_.strftime('%Y-%m-%d %H:%M:%S'))
-    asyncio.run(main())
+def ohlc(editData, interval: int = 1):
+    df_ = pd.DataFrame(editData)
+    df_['date'] = pd.to_datetime(df_['trade_timestamp'], unit='ms', utc=True).dt.tz_convert(pytz.timezone('Asia/Seoul'))
+    df_.set_index('date', inplace=True)
+    df_.index = df_.index.tz_localize(None)
+    ohlc = df_.resample(f'{interval}min').agg({'trade_price': 'ohlc',
+                                               'volume_ask': 'sum',
+                                               'volume_bid': 'sum',
+                                               'count_ask': 'sum',
+                                               'count_bid': 'sum',
+                                               'seller':'sum',
+                                               'buyer':'sum'})
+    ohlc.columns = [col[1] for col in ohlc.columns.values]
+    return ohlc
 
 
 
+# ticker_ = 'KRW-GLM'
+target_ = '2024-06-01 07:30:00'
 
+pd.set_option('display.max_rows', None)
 
+def my_py(ticker :str, date :str):
+    DataLoader(ticker=ticker).Load()
+    ohlc_ = ohlc(DataLoader(ticker=ticker).Load())
+    ohlc_['volume'] = ohlc_['volume_ask'] + ohlc_['volume_bid']
+    up_ = pu.get_ohlcv(ticker, interval='minute1', count=60*24)
+    up_ = up_.loc[up_.index >= target_].round(10)
+    my_ = ohlc_.loc[ohlc_.index >= target_].copy().round(10)
+    print(up_['volume'] - my_['volume'])
 
+def get_tickers():
+    tickers = []
+    list_ = os.listdir(os.path.join(os.path.dirname(os.getcwd()), 'DataBase'))
+    for i in list_:
+        if i.startswith('KRW'):
+            tickers.append(i)
+    return tickers
 
-
-
-
-
+while True:
+    tickers_ = get_tickers()
+    for ticker in tickers_:
+        try:
+            print(ticker)
+            my_py(ticker=ticker, date=target_)
+            print('\n')
+        except:
+            pass
+    time.sleep(60)
+# %%
