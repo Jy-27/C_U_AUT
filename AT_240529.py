@@ -157,53 +157,58 @@ class DataSaver:
          버퍼역할을 추가하고 다시 테스트 해볼필요가 있다.
     """
     def __init__(self, maxlen :int = 5_000):
-        self.deque_inside = deque()
-        self.deque_save = deque()
+        # self.deque_inside = deque()
+        self.deque = deque()
         self.maxlen = maxlen
         self.edited_data = None
         self.classname = self.__class__.__name__
         # self.lock = asyncio.Lock
 
-    async def Append(self, queue_input):
-        while not queue_input.empty():
-            getData = await queue_input.get()
-            edited_data = edit_data(getData)
-            if self.deque_inside:
-                index_last_data = self.deque_inside[-1]
-                check_timestamp = edited_data['trade_timestamp'] == index_last_data['trade_timestamp']
-                check_price = edited_data['trade_price'] == index_last_data['trade_price']
+    async def Append(self, data):
+        edited_data = edit_data(data)
+        await asyncio.sleep(0)
+        if self.deque:
+            index_last_data = self.deque[-1]
+            check_timestamp = edited_data['trade_timestamp'] == index_last_data['trade_timestamp']
+            check_price = edited_data['trade_price'] == index_last_data['trade_price']
 
-                if all([check_timestamp, check_price]):
-                    index_last_data = self.deque_inside.pop()
-                    index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
-                                            'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
-                                            'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
-                                            'count_bid' : edited_data['count_bid'] + index_last_data['count_bid']})
-                    self.deque_inside.append(index_last_data)
-                else:
-                    self.deque_inside.append(edited_data)
+            if all([check_timestamp, check_price]):
+                # index_last_data = self.deque[-1]
+                index_last_data = self.deque.pop()
+                index_last_data.update({'volume_ask': edited_data['volume_ask'] + index_last_data['volume_ask'],
+                                        'volume_bid': edited_data['volume_bid'] + index_last_data['volume_bid'],
+                                        'count_ask' : edited_data['count_ask'] + index_last_data['count_ask'],
+                                        'count_bid' : edited_data['count_bid'] + index_last_data['count_bid']})
+                self.deque.append(index_last_data)
             else:
-                self.deque_inside.append(edited_data)
-            await asyncio.sleep(0)
+                self.deque.append(edited_data)
+        else:
+            self.deque.append(edited_data)
 
-        if len(self.deque_inside) >= self.maxlen:
-            await self.Dump()
+        # print(self.deque)
+
+        if len(self.deque) >= self.maxlen:
+            # print(f'{self.deque[0]['code']} :: Dump!!')
+            self.Dump()
     
-    async def Dump(self):
+    def Dump(self):
         directory_ = os.path.join(os.path.dirname(os.getcwd()),
                                   'DataBase',
-                                  self.deque_inside[0]['code'])
-        file_ = str(int(self.deque_inside[0]['trade_timestamp'])) + '.json'
+                                  self.deque[0]['code'])
+        file_ = str(int(self.deque[0]['trade_timestamp'])) + '.json'
         if not os.path.exists(directory_):
             os.makedirs(directory_)
         path_ = os.path.join(directory_, file_)
-        for _ in range(len(self.deque_inside)):
-            popLeft = self.deque_inside.popleft()
-            self.deque_save.append(popLeft)
-            await asyncio.sleep(0)
+        
+        # save_data = deque()
+        
+        # for _ in range(len(self.deque)):
+        #     popLeft = self.deque.popleft()
+        #     save_data.append(popLeft)
+        # print(save_data)
         with open(path_, "w", encoding='utf-8') as f:
-            json.dump(list(self.deque_save), f, ensure_ascii=False, indent=4)
-        self.deque_save.clear()
+            json.dump(list(self.deque), f, ensure_ascii=False, indent=4)
+        self.deque.clear()
 
 class DataLoader:
     def __init__(self, ticker :str, start :int=7):
@@ -274,16 +279,17 @@ class DataMerge:
         return list(self.mergeData)
 
 async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, timeSleep :int=5):
-    saver_ = {}
-    merge_ = {}
-    queue_ = {}
+    Saver_ = {}
+    # merge_ = {}
+    # queue_ = {}
     while True:
-        tickers = pu.get_tickers('KRW')
+        # tickers = pu.get_tickers('KRW')
+        # Saver_ = DataSaver(maxlen=SaveMaxlen)
         for ticker in tickers:
-            if ticker not in saver_.keys():
-                saver_[ticker] = DataSaver(maxlen=SaveMaxlen)
-                merge_[ticker] = DataMerge(maxlen=MergeMaxlen)
-                queue_[ticker] = asyncio.Queue()
+            if ticker not in Saver_.keys():
+                Saver_[ticker] = DataSaver(maxlen=SaveMaxlen)
+        #         merge_[ticker] = DataMerge(maxlen=MergeMaxlen)
+                # queue_[ticker] = asyncio.Queue()
         timeNow = datetime.datetime.now()
         timeDelta = datetime.timedelta(hours=2)
         whileExit = timeNow + timeDelta
@@ -291,19 +297,20 @@ async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, tim
         while timeNow <= whileExit:
             while not queue.empty():
                 q_data = await queue.get()
+                # print(q_data)
                 ticker = q_data['code']
-                if ticker in queue_.keys():
-                    await queue_[ticker].put(q_data)
-                    # await self.merge_[code].AddRealtimeData(realtimeData=q_data)
-
-                    await saver_[ticker].Append(queue_input=queue_[ticker])
+                # print(q_data)
+                # if ticker in queue_.keys():
+                # await queue_[ticker].put(q_data)
+                # await self.merge_[code].AddRealtimeData(realtimeData=q_data)
+                await Saver_[ticker].Append(data=q_data)
                     # await (saver_[ticker]).process(deque_[ticker])
                     # cls.saver_[code].process(data=cls.deque_[code])
                     # await cls.saver_[code].process(data=cls.deque_[code])
                     # .process(data=cls.deque_[code])
                     # .process(data=cls.deque_[code])
                     # print(f'{sys._getframe().f_lineno}')
-                    await asyncio.sleep(0)
+                # await asyncio.sleep(0)
 
                 #// TEST ZONE START
                 # for ticker in tickers:
@@ -316,7 +323,7 @@ async def DataManager(queue, SaveMaxlen :int=2_000, MergeMaxlen :int=10_000, tim
                 #         print('data가 없습니다')
                 #// TEST ZONE END
             await asyncio.sleep(timeSleep)
-
+        await asyncio.sleep(0)
 #=============================================================================================
 
 
@@ -436,22 +443,24 @@ class MarketOrder:
             print(f'Order fail (Sell): {self.ticker}')
 
 async def websocket(queue, restartRange :int=12):#updater, queue, hour :int=2, dataType :str='trade'):
-    tickers_all = pu.get_tickers(fiat='KRW')
-    WM_T = pu.WebSocketManager(type='trade', codes=tickers_all)
+    # tickers_all = pu.get_tickers(fiat='KRW')
+    # tickers_all = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE', 'KRW-ETC', 'KRW-BCH']
+    WM_T = pu.WebSocketManager(type='trades', codes=tickers)
 
     while True:
         try:
             data_t = WM_T.get()
+            # print(data_t['trade_volume'])
             await queue.put(data_t)
             await asyncio.sleep(0)
         except Exception as e:
             print(e)
             WM_T.terminate()
-            tickers_all = pu.get_tickers(fiat='KRW')
-            WM_T = pu.WebSocketManager(type='trade', codes=tickers_all)
+            # tickers_all = pu.get_tickers(fiat='KRW')
+            WM_T = pu.WebSocketManager(type='trade', codes=tickers)
 
 async def main():
-    MAXLEN_SAVE = 10
+    MAXLEN_SAVE = 1_000
     MAXLEN_MERGE = 10_000
     # print(MAXLEN_)
     q_ = asyncio.Queue()
@@ -463,6 +472,7 @@ async def main():
                         handler_task)
 
 if __name__ == "__main__":
+    tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-SOL', 'KRW-DOGE', 'KRW-ETC', 'KRW-BCH', 'KRW-TRX']
     time_ = datetime.datetime.now()
     print(time_.strftime('%Y-%m-%d %H:%M:%S'))
     asyncio.run(main())
