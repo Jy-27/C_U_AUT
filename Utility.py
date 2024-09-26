@@ -323,47 +323,90 @@ class Utility(Analysis):
         is_balance_sufficient = expected_balance >= required_balance
         return is_balance_sufficient, optimal_balance
 
-    async def _position_stopper(self, ratio: float = 0.7):
-        while True:
+    ## ===== Original CODE ==== 240926
+    # async def _position_stopper(self, ratio: float = 0.7):
+    #     while True:
+    #         standard_ratio = 0.02
+            
+    #         # 큐에 데이터가 없으면 바로 처리하지 않도록 함
+    #         if not self.trade_data_queue:
+    #             await asyncio.sleep(5)
+    #             continue
+            
+    #         while self.position_stopper:
+    #             real_data = self.trade_data_queue[-1]
+                
+    #             for symbol, data in self.position_stopper.items():
+    #                 if symbol == real_data[0] and data['position'] == 'LONG':
+    #                     entryPrice = self.position_stopper[symbol]['EntryPrice']
+    #                     lastPrice = max(entryPrice, real_data[1])
+    #                     calculator_target = entryPrice + ratio * (lastPrice - entryPrice)
+    #                     targetPrice = min(calculator_target, lastPrice * (1 - standard_ratio))
+    #                     self.position_stopper[symbol]['LastPrice'] = lastPrice
+    #                     self.position_stopper[symbol]['TargetPrice'] = targetPrice
+
+    #                     # 목표가와 실시간 가격 비교
+    #                     if targetPrice > real_data[1]:
+    #                         self.close_position(symbol=symbol)
+    #                         del self.position_stopper[symbol]
+
+    #                 elif symbol == real_data[0] and data['position'] == 'SHORT':
+    #                     entryPrice = self.position_stopper[symbol]['EntryPrice']
+    #                     lastPrice = min(entryPrice, real_data[1])
+    #                     calculator_target = entryPrice - ratio * (entryPrice - lastPrice)
+    #                     targetPrice = max(calculator_target, lastPrice * (1 + standard_ratio))
+    #                     self.position_stopper[symbol]['LastPrice'] = lastPrice
+    #                     self.position_stopper[symbol]['TargetPrice'] = targetPrice
+
+    #                     # 목표가와 실시간 가격 비교
+    #                     if targetPrice < real_data[1]:
+    #                         self.close_position(symbol=symbol)
+    #                         del self.position_stopper[symbol]
+                
+    #             await asyncio.sleep(5)
+
+    ## ==== CHATGPT 개선코드 ====
+        async def _position_stopper(self, ratio: float = 0.7):
             standard_ratio = 0.02
             
-            # 큐에 데이터가 없으면 바로 처리하지 않도록 함
-            if not self.trade_data_queue:
-                await asyncio.sleep(5)
-                continue
-            
-            while self.position_stopper:
-                real_data = self.trade_data_queue[-1]
+            while True:
+                # 큐에 데이터가 없으면 바로 처리하지 않도록 함
+                if not self.trade_data_queue:
+                    await asyncio.sleep(5)
+                    continue
                 
+                # position_stopper에서 관리되는 모든 심볼에 대해 처리
                 for symbol, data in self.position_stopper.items():
-                    if symbol == real_data[0] and data['position'] == 'LONG':
-                        entryPrice = self.position_stopper[symbol]['EntryPrice']
+                    real_data = self.trade_data_queue[-1]
+                    
+                    if symbol != real_data[0]:
+                        continue
+                    
+                    entryPrice = self.position_stopper[symbol]['EntryPrice']
+                    
+                    if data['position'] == 'LONG':
                         lastPrice = max(entryPrice, real_data[1])
                         calculator_target = entryPrice + ratio * (lastPrice - entryPrice)
                         targetPrice = min(calculator_target, lastPrice * (1 - standard_ratio))
-                        self.position_stopper[symbol]['LastPrice'] = lastPrice
-                        self.position_stopper[symbol]['TargetPrice'] = targetPrice
-
-                        # 목표가와 실시간 가격 비교
-                        if targetPrice > real_data[1]:
-                            self.close_position(symbol=symbol)
-                            del self.position_stopper[symbol]
-
-                    elif symbol == real_data[0] and data['position'] == 'SHORT':
-                        entryPrice = self.position_stopper[symbol]['EntryPrice']
+                    
+                    elif data['position'] == 'SHORT':
                         lastPrice = min(entryPrice, real_data[1])
                         calculator_target = entryPrice - ratio * (entryPrice - lastPrice)
                         targetPrice = max(calculator_target, lastPrice * (1 + standard_ratio))
-                        self.position_stopper[symbol]['LastPrice'] = lastPrice
-                        self.position_stopper[symbol]['TargetPrice'] = targetPrice
-
-                        # 목표가와 실시간 가격 비교
-                        if targetPrice < real_data[1]:
-                            self.close_position(symbol=symbol)
-                            del self.position_stopper[symbol]
-                
+        
+                    # 포지션 정보 업데이트
+                    self.position_stopper[symbol]['LastPrice'] = lastPrice
+                    self.position_stopper[symbol]['TargetPrice'] = targetPrice
+        
+                    # 목표가와 실시간 가격 비교 후 포지션 청산
+                    if (data['position'] == 'LONG' and targetPrice > real_data[1]) or \
+                       (data['position'] == 'SHORT' and targetPrice < real_data[1]):
+                        self.close_position(symbol=symbol)
+                        del self.position_stopper[symbol]
+        
                 await asyncio.sleep(5)
-                
+
+
 async def main():
     tickers = ['btcusdt', 'xrpusdt', 'solusdt', 'dogeusdt', 'hifiusdt', 'bnbusdt']
     instance_ = Utility(tickers=tickers)
