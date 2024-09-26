@@ -81,6 +81,13 @@ class Utility(Analysis):
                         'liquidationPrice': float(position['liquidationPrice']),
                         'marginType': str(position['marginType'])
                         }
+                    
+                    open_position = "LONG" if float(position['positionAmt']) > 0 else "SHORT"
+                    position_columns = "highPrice" if open_position =="LONG" else "lowPrice"
+                    self.position_stopper[position['symbol']] = {"position": "LONG" if float(position['positionAmt']) > 0 else "SHORT",
+                                                     "entryPrice" : float(position['entryPrice']),
+                                                     position_columns : float(position['entryPrice']),
+                                                     "targetPrice" : None}
             self.futures_account_balance = account_data
             return account_data
 
@@ -183,13 +190,14 @@ class Utility(Analysis):
         """Place a market order."""
         
         position = position.upper()
-        
+        order_type = order_type.upper()
+        symbol = symbol.upper()
         side = {'LONG':'BUY',
                 'SHORT':'SELL'}.get(position, None)
         
         try:
             response = client.futures_create_order(
-                symbol = symbol.upper(),
+                symbol = symbol,
                 side = side,  # 'BUY' 또는 'SELL'
                 type = 'MARKET',
                 quantity = quantity,
@@ -197,21 +205,16 @@ class Utility(Analysis):
             )
             print(f"Market order placed: {response}")
             self.fetch_account_balance()
-            order_type = order_type.upper()
             if order_type == 'OPEN':
-                entryprice = self.fetch_account_balance[symbol]['entryPrice']
-                self.position_stopper[symbol] = {'EntryPrice':entryprice,
-                                                 'LastPrice':entryprice,
-                                                 'TargetPrice':None,
+                entryprice = self.futures_account_balance[symbol]['entryPrice']
+                self.position_stopper[symbol] = {'entryPrice':entryprice,
+                                                 'targetPrice':None,
                                                  'position':side}
-                print(self.position_stopper)
             elif order_type == 'CLOSE':
                 if self.position_stopper:
                     del self.position_stopper[symbol]
-                print(self.position_stopper)
                 
             self.check_balance_optimal = self.check_balance_and_calculate_optimal(balance_ratio=0.4)
-            
             return response
         
         except BinanceAPIException as e:
@@ -366,45 +369,60 @@ class Utility(Analysis):
     #             await asyncio.sleep(5)
 
     ## ==== CHATGPT 개선코드 ====
-        async def _position_stopper(self, ratio: float = 0.7):
-            standard_ratio = 0.02
+    async def _position_stopper(self, ratio: float = 0.7):
+        standard_ratio = 0.02
+        
+        while True:
+            # 큐에 데이터가 없으면 바로 처리하지 않도록 함
+            if len(self.trade_data_queue) < 100 or not self.position_stopper:
+                await asyncio.sleep(5)
+                print(self.position_stopper)
+                continue
             
-            while True:
-                # 큐에 데이터가 없으면 바로 처리하지 않도록 함
-                if not self.trade_data_queue:
-                    await asyncio.sleep(5)
+            # position_stopper에서 관리되는 모든 심볼에 대해 처리
+            print(f"\n{datetime.datetime.now()}")
+            
+            for symbol, data in self.position_stopper.items():
+                real_data_100_items = list(self.trade_data_queue)[-100:]
+                symbol_items = [item for item in real_data_100_items if item[0] == symbol]
+                values = [item[1] for item in symbol_items]
+                
+                if not values:
                     continue
                 
-                # position_stopper에서 관리되는 모든 심볼에 대해 처리
-                for symbol, data in self.position_stopper.items():
-                    real_data = self.trade_data_queue[-1]
-                    
-                    if symbol != real_data[0]:
-                        continue
-                    
-                    entryPrice = self.position_stopper[symbol]['EntryPrice']
-                    
-                    if data['position'] == 'LONG':
-                        lastPrice = max(entryPrice, real_data[1])
-                        calculator_target = entryPrice + ratio * (lastPrice - entryPrice)
-                        targetPrice = min(calculator_target, lastPrice * (1 - standard_ratio))
-                    
-                    elif data['position'] == 'SHORT':
-                        lastPrice = min(entryPrice, real_data[1])
-                        calculator_target = entryPrice - ratio * (entryPrice - lastPrice)
-                        targetPrice = max(calculator_target, lastPrice * (1 + standard_ratio))
-        
-                    # 포지션 정보 업데이트
-                    self.position_stopper[symbol]['LastPrice'] = lastPrice
-                    self.position_stopper[symbol]['TargetPrice'] = targetPrice
-        
-                    # 목표가와 실시간 가격 비교 후 포지션 청산
-                    if (data['position'] == 'LONG' and targetPrice > real_data[1]) or \
-                       (data['position'] == 'SHORT' and targetPrice < real_data[1]):
-                        self.close_position(symbol=symbol)
-                        del self.position_stopper[symbol]
-        
-                await asyncio.sleep(5)
+                max_value = max(values)
+                min_value = min(values)
+                last_price = values[-5:]
+                
+                entryPrice = self.position_stopper[symbol]['entryPrice']
+                
+                pprint(self.position_stopper[symbol])
+                
+                
+                if data['position'] == 'LONG':
+                    highPrice = max(self.position_stopper[symbol]['highPrice'], max_value)
+                    calculator_target = highPrice + ratio * (highPrice - entryPrice)
+                    targetPrice = min(calculator_target, highPrice * (1 - standard_ratio))
+                    self.position_stopper[symbol]['targetPrice'] = targetPrice
+                    self.position_stopper[symbol]['highPrice'] = highPrice
+
+                elif data['position'] == 'SHORT':
+                    lowPrice = min(self.position_stopper[symbol]['lowPrice'], min_value)
+                    calculator_target = entryPrice - ratio * (entryPrice - lowPrice)
+                    targetPrice = max(calculator_target, lowPrice * (1 + standard_ratio))
+                    self.position_stopper[symbol]['targetPrice'] = targetPrice
+                    self.position_stopper[symbol]['lowPrice'] = lowPrice
+    
+                # 포지션 정보 업데이트
+                self.position_stopper[symbol]['targetPrice'] = targetPrice
+                
+                # 목표가와 실시간 가격 비교 후 포지션 청산
+                if (data['position'] == 'LONG' and targetPrice > min(last_price)) or \
+                    (data['position'] == 'SHORT' and targetPrice < max(last_price)):
+                    self.close_position(symbol=symbol)
+                    del self.position_stopper[symbol]
+    
+            await asyncio.sleep(5)
 
 
 async def main():
@@ -412,12 +430,12 @@ async def main():
     instance_ = Utility(tickers=tickers)
     instance_.initialize_client()
     pprint(instance_.fetch_account_balance())
-    instance_.close_position(symbol='all')
-    time.sleep(1)
-    instance_.open_position(position='long', symbol=tickers[3])
-    instance_.configure_margin_and_leverage(symbol=tickers[3], leverage=1)
-    instance_.open_position(position='short', symbol=tickers[1])
-    instance_.configure_margin_and_leverage(symbol=tickers[1], leverage=1)
+    # instance_.close_position(symbol='all')
+    # time.sleep(1)
+    # instance_.open_position(position='short', symbol=tickers[3])
+    # instance_.configure_margin_and_leverage(symbol=tickers[3], leverage=5)
+    # instance_.open_position(position='long', symbol=tickers[1])
+    # instance_.configure_margin_and_leverage(symbol=tickers[1], leverage=5)
     instance_.fetch_account_balance()
     pprint(instance_.position_stopper)
     
