@@ -420,7 +420,7 @@ class Utility(Analysis):
                 if (data['position'] == 'LONG' and targetPrice > min(last_price)) or \
                     (data['position'] == 'SHORT' and targetPrice < max(last_price)):
                     self.close_position(symbol=symbol)
-                    del self.position_stopper[symbol]
+                    # del self.position_stopper[symbol]
     
             await asyncio.sleep(5)
 
