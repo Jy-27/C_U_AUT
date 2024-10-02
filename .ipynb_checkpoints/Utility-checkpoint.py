@@ -205,10 +205,10 @@ class Utility(Analysis):
                     reduce_only = reduce
                 )
                 print(f"Market order placed: {response}")
-                sefl.isPending[symbol] = reduce
+                self.isPending[symbol] = not reduce
                 self.fetch_account_balance()
                 if reduce:
-                    entryprice = self.futures_account_balance[symbol]['entryPrice']
+                    entryprice = self.futures_account_balance.get(symbol, None).get('entryPrice', None)
                     self.position_stopper[symbol] = {'entryPrice':entryprice,
                                                      'targetPrice':None,
                                                      'position':side}
@@ -447,9 +447,10 @@ async def main():
     instance_.open_position(position='short', symbol=tickers[1])
     instance_.fetch_account_balance()
     pprint(instance_.position_stopper)
+
+    #asyncio.create_task(instance_.connect_websocket()),
     
-    tasks = [asyncio.create_task(instance_.connect_websocket()),
-            asyncio.create_task(instance_.fetch_ohlcv_data()),
+    tasks = [asyncio.create_task(instance_.fetch_ohlcv_data()),
             asyncio.create_task(instance_.get_max_min_for_ranges()),
             asyncio.create_task(instance_.update_data_periodically()),
             asyncio.create_task(instance_._position_stopper())

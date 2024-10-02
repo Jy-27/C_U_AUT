@@ -15,10 +15,10 @@ import nest_asyncio
 class Utility(Analysis):
     def __init__(self, tickers):
         super().__init__(tickers=tickers)
-        self.isPending = {}
-        self.futures_account_balance = None
-        self.check_balance_optimal = None
-        self.position_stopper = {}
+        self.isPending: Dict[str, bool] = {}
+        self.account_balance: Dict[str, Dict[str, int | float]] = None
+        self.check_balance_optimal: Tuple[bool, float] = None
+        self.position_stopper: Dict[str, Dict[str, dict]]= {}
         self.real_time_range: Dict[int, int] = {1: 3}#, 3: 2}
 
     def initialize_client(self, config_path: str = '/Volumes/SSD_256GB/C_U_AUT/API/binance.json') -> tuple:
@@ -30,7 +30,7 @@ class Utility(Analysis):
         api_secret = config_data.get('secret')
         client = Client(api_key, api_secret)
     
-    def fetch_account_balance(self, account_type: str = 'futures') -> dict:
+    def get_account_balance(self, account_type: str = 'futures') -> dict:
         """Fetch account balance information for the specified account type."""
         if account_type == 'spot':
             account_info = client.get_account()
@@ -47,7 +47,7 @@ class Utility(Analysis):
                         'Free': free_balance,
                         'Locked': locked_balance
                     }
-            self.futures_account_balance = account_data
+            self.account_balance = account_data
             return account_data
         
         elif account_type == 'futures':
@@ -89,7 +89,7 @@ class Utility(Analysis):
                                                      "entryPrice" : float(position['entryPrice']),
                                                      position_columns : float(position['entryPrice']),
                                                      "targetPrice" : None}
-            self.futures_account_balance = account_data
+            self.account_balance = account_data
             return account_data
 
     def calculate_minimum_order_quantity(self, symbol: str) -> float:
@@ -196,27 +196,26 @@ class Utility(Analysis):
                 'SHORT':'SELL'}.get(position, None)
         
         try:
-            if not self.isPending.get(symbol, False):
-                response = client.futures_create_order(
-                    symbol = symbol,
-                    side = side,  # 'BUY' 또는 'SELL'
-                    type = 'MARKET',
-                    quantity = quantity,
-                    reduce_only = reduce
-                )
-                print(f"Market order placed: {response}")
-                sefl.isPending[symbol] = reduce
-                self.fetch_account_balance()
-                if reduce:
-                    entryprice = self.futures_account_balance[symbol]['entryPrice']
-                    self.position_stopper[symbol] = {'entryPrice':entryprice,
-                                                     'targetPrice':None,
-                                                     'position':side}
-                elif not reduce:
-                    if self.position_stopper:
-                        self.position_stopper[symbol] = None
-                self.check_balance_optimal = self.check_balance_and_calculate_optimal(balance_ratio=0.4)
-                return response
+            response = client.futures_create_order(
+                symbol = symbol,
+                side = side,  # 'BUY' 또는 'SELL'
+                type = 'MARKET',
+                quantity = quantity,
+                reduce_only = reduce
+            )
+            print(f"Market order placed: {response}")
+            self.isPending[symbol] = not reduce
+            self.get_account_balance()
+            if reduce:
+                entryprice = self.account_balance.get(symbol, None).get('entryPrice', None)
+                self.position_stopper[symbol] = {'entryPrice':entryprice,
+                                                    'targetPrice':None,
+                                                    'position':side}
+            elif not reduce:
+                if self.position_stopper:
+                    self.position_stopper[symbol] = None
+            self.check_balance_optimal = self.check_balance_and_calculate_optimal(balance_ratio=0.4)
+            return response
         
         except BinanceAPIException as e:
             print(f"An error occurred: {e}")
@@ -227,7 +226,7 @@ class Utility(Analysis):
         symbol: 종목(symbol) 이름 또는 'ALL' (모든 포지션 종료)
         """
         symbol = symbol.upper()  # 대문자로 변환하여 종목 일관성 유지
-        account_balance = self.futures_account_balance  # 계좌 잔고 및 포지션 정보 가져오기
+        account_balance = self.account_balance  # 계좌 잔고 및 포지션 정보 가져오기
 
         def close_single_position(symbol, position_info):
             """
@@ -246,6 +245,7 @@ class Utility(Analysis):
             
             # 시장가 주문을 통해 포지션 종료
             self.place_market_order(symbol=symbol, position=position, quantity=quantity, reduce=True)
+            self.isPending[symbol] = False
             print(f"{symbol} 포지션을 {position}로 {quantity} 개 종료했습니다.")
 
         if symbol != 'ALL':  # 단일 종목 종료
@@ -265,8 +265,8 @@ class Utility(Analysis):
     def open_position(self, position: str, symbol: str):
         isPending = self.isPending.get(symbol, False)
         self.check_balance_optimal = self.check_balance_and_calculate_optimal()
-        if not self.futures_account_balance:
-            self.fetch_account_balance()
+        if not self.account_balance:
+            self.get_account_balance()
         if self.check_balance_optimal is not None and self.check_balance_optimal[0] is True:
             Qty = self.calculate_minimum_order_quantity(symbol)
 
@@ -288,16 +288,16 @@ class Utility(Analysis):
         - (bool, optimal_balance): 잔액이 요구되는 잔액을 충족하는지 여부와 최적 잔액
         """
         # 잔액이 없는 경우 계좌 잔액을 가져옴
-        if not self.futures_account_balance:
-            self.fetch_account_balance()
+        if not self.account_balance:
+            self.get_account_balance()
 
         # USDT 잔액 가져오기
-        usdt_balance = self.futures_account_balance.get('USDT', {}).get('Wallet Balance', 0)
+        usdt_balance = self.account_balance.get('USDT', {}).get('Wallet Balance', 0)
         total_entry_price = 0
 
         # 각 포지션에 대한 진입 가격 및 수량 계산
-        if len(self.futures_account_balance) >= 2:
-            for key, data in self.futures_account_balance.items():
+        if len(self.account_balance) >= 2:
+            for key, data in self.account_balance.items():
                 if key != 'USDT':
                     entry_price = float(data.get('entryPrice', 0))
                     position_qty = abs(float(data.get('positionAmt', 0)))
@@ -438,18 +438,19 @@ async def main():
     path = '/Users/nnn/Desktop/API/binance.json'
     
     instance_.initialize_client(path)
-    pprint(instance_.fetch_account_balance())
+    pprint(instance_.get_account_balance())
     
     # instance_.close_position(symbol='all')
     # time.sleep(1)
     instance_.configure_margin_and_leverage(symbol=tickers[3], leverage=1)
     instance_.open_position(position='short', symbol=tickers[1])
     instance_.open_position(position='short', symbol=tickers[1])
-    instance_.fetch_account_balance()
+    instance_.get_account_balance()
     pprint(instance_.position_stopper)
+
+    #asyncio.create_task(instance_.connect_websocket()),
     
-    tasks = [asyncio.create_task(instance_.connect_websocket()),
-            asyncio.create_task(instance_.fetch_ohlcv_data()),
+    tasks = [asyncio.create_task(instance_.fetch_ohlcv_data()),
             asyncio.create_task(instance_.get_max_min_for_ranges()),
             asyncio.create_task(instance_.update_data_periodically()),
             asyncio.create_task(instance_._position_stopper())
@@ -479,7 +480,7 @@ if __name__ == "__main__":
     # tickers = ['btcusdt', 'xrpusdt', 'solusdt', 'dogeusdt', 'hifiusdt', 'bnbusdt']
     # dummy_instance = Utility(tickers=tickers)
     # dummy_instance.initialize_client()
-    # dummy_instance.fetch_account_balance()
+    # dummy_instance.get_account_balance()
     # symbols = ['xrpUSDT', 'adausdt', 'loomusdt', 'dogeusdt', 'eosusdt']
     
     # pprint(dummy_instance.__dict__)
@@ -495,6 +496,6 @@ if __name__ == "__main__":
     # # time.sleep(1)
     # dummy_instance.close_position(symbol='loomusdt')
     # # dummy_instance.place_market_order(symbol=symbols[-1], side='buy', quantity=77)
-    # # pprint(dummy_instance.futures_account_balance)
+    # # pprint(dummy_instance.account_balance)
     
     
