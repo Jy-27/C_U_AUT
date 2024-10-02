@@ -21,7 +21,7 @@ class Utility(Analysis):
         self.position_stopper: Dict[str, Dict[str, dict]]= {}
         self.real_time_range: Dict[int, int] = {1: 3}#, 3: 2}
 
-    def initialize_client(self, config_path: str = '/Volumes/SSD_256GB/C_U_AUT/API/binance.json') -> tuple:
+    def init_client(self, config_path: str = '/Volumes/SSD_256GB/C_U_AUT/API/binance.json') -> tuple:
         """Load API keys from a JSON configuration file."""
         global client, api_key, api_secret
         with open(config_path, 'r') as file:
@@ -92,7 +92,7 @@ class Utility(Analysis):
             self.account_balance = account_data
             return account_data
 
-    def calculate_minimum_order_quantity(self, symbol: str) -> float:
+    def get_minimum_quantity(self, symbol: str) -> float:
         symbol = symbol.upper()
         url = 'https://fapi.binance.com/fapi/v1/exchangeInfo'
         
@@ -144,7 +144,7 @@ class Utility(Analysis):
 
         return None
 
-    def configure_margin_and_leverage(self, symbol: str, leverage: int, margin_type: str="ISOLATED"):
+    def set_margin_leverage(self, symbol: str, leverage: int, margin_type: str="ISOLATED"):
         """
         Configure both margin type and leverage for a symbol.
         
@@ -187,8 +187,29 @@ class Utility(Analysis):
 
         return responses
 
-    def place_market_order(self, symbol: str, position: str, quantity: float, reduce: bool=False):
-        """Place a market order."""
+    def update_isPending(self):
+        """
+        get_account_balance를 기준하여 position open 처리하려 하였으나,
+        통신 시간의 차이에 따른 즉시 기준잡을 데이터가 없음. 이에 따른 기준점 생성.
+        """
+        # 기본적으로 모든 키에 대해 True로 설정
+        if not self.isPending:
+            for key in self.account_balance.keys():
+                self.isPending[key] = True
+        else:
+            # 키가 있는 경우에 대해서만 True로 설정, 없는 경우 False로 설정
+            for key in self.account_balance.keys():
+                self.isPending[key] = key in self.account_balance
+
+        return self.isPending
+
+    async def place_market_order(self, symbol: str, position: str, quantity: float, reduce: bool=False):
+        """
+            symbol : 쌍거래 Ticker정보, 
+            position : 'LONG', 'SHORT',
+            quantity : 주문 수량    (최수주문 수량계산 함수는 'get_minimum_quantity'),
+            reduce : True(open) / False(close)
+        """
         
         position = position.upper()
         symbol = symbol.upper()
@@ -204,13 +225,15 @@ class Utility(Analysis):
                 reduce_only = reduce
             )
             print(f"Market order placed: {response}")
+            
             self.isPending[symbol] = not reduce
             self.get_account_balance()
+            await asyncio.sleep(0.5)
             if reduce:
-                entryprice = self.account_balance.get(symbol, None).get('entryPrice', None)
-                self.position_stopper[symbol] = {'entryPrice':entryprice,
-                                                    'targetPrice':None,
-                                                    'position':side}
+                entry_price = self.account_balance.get(symbol, {}).get('entryPrice')
+                self.position_stopper[symbol] = {'entryPrice':entry_price,
+                                                 'targetPrice':None,
+                                                 'position':side}
             elif not reduce:
                 if self.position_stopper:
                     self.position_stopper[symbol] = None
@@ -220,7 +243,7 @@ class Utility(Analysis):
         except BinanceAPIException as e:
             print(f"An error occurred: {e}")
 
-    def close_position(self, symbol: str):
+    async def close_position(self, symbol: str='all'):
         """
         특정 종목(symbol) 또는 전체(All) 포지션을 종료하는 함수
         symbol: 종목(symbol) 이름 또는 'ALL' (모든 포지션 종료)
@@ -267,12 +290,12 @@ class Utility(Analysis):
         self.check_balance_optimal = self.check_balance_and_calculate_optimal()
         if not self.account_balance:
             self.get_account_balance()
-        if self.check_balance_optimal is not None and self.check_balance_optimal[0] is True:
-            Qty = self.calculate_minimum_order_quantity(symbol)
+        if self.check_balance_optimal is not None and bool(self.check_balance_optimal[0]) and isPending:
+            Qty = self.get_minimum_quantity(symbol)
 
             "===== DEBUG ====="
             print(Qty)
-            
+            self.isPending[symbol] = True
             self.place_market_order(symbol=symbol, position=position, quantity=Qty)
         else:
             print(f'설정 잔액 부족 {self.check_balance_optimal}')
@@ -437,12 +460,12 @@ async def main():
 
     path = '/Users/nnn/Desktop/API/binance.json'
     
-    instance_.initialize_client(path)
+    instance_.init_client(path)
     pprint(instance_.get_account_balance())
     
     # instance_.close_position(symbol='all')
     # time.sleep(1)
-    instance_.configure_margin_and_leverage(symbol=tickers[3], leverage=1)
+    instance_.set_margin_leverage(symbol=tickers[3], leverage=1)
     instance_.open_position(position='short', symbol=tickers[1])
     instance_.open_position(position='short', symbol=tickers[1])
     instance_.get_account_balance()
@@ -479,14 +502,14 @@ if __name__ == "__main__":
     
     # tickers = ['btcusdt', 'xrpusdt', 'solusdt', 'dogeusdt', 'hifiusdt', 'bnbusdt']
     # dummy_instance = Utility(tickers=tickers)
-    # dummy_instance.initialize_client()
+    # dummy_instance.init_client()
     # dummy_instance.get_account_balance()
     # symbols = ['xrpUSDT', 'adausdt', 'loomusdt', 'dogeusdt', 'eosusdt']
     
     # pprint(dummy_instance.__dict__)
     
     # for symbol in symbols:
-    #     dummy_instance.configure_margin_and_leverage(symbol=symbol, leverage=5, margin_type='isolated')
+    #     dummy_instance.set_margin_leverage(symbol=symbol, leverage=5, margin_type='isolated')
     #     dummy_instance.open_position(symbol=symbol, position='short')
 
     

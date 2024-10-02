@@ -6,11 +6,15 @@ path = '/Users/nnn/Desktop/API/binance.json'
 tickers = ['xrpusdt', 'adausdt', 'dogeusdt']
 
 u = Utility.Utility(tickers)
-u.initialize_client(path)
+u.init_client(path)
 u.get_account_balance()
 
 print(tickers)
 print(path)
 print('instance_name : u\n')
 
-print(u.account_balance)
+pprint(u.account_balance)
+u.close_position()
+u.open_position('long', 'dogeusdt')
+u.open_position('long', 'dogeusdt')
+print('END!')
