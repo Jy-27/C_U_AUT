@@ -6,7 +6,7 @@ from pprint import pprint
 class Analysis(EnhancedDataHandler):
     def __init__(self, tickers):
         super().__init__(tickers=tickers)
-        self.real_time_range: Dict[int, int] = {1: 6, 3: 2}#, 5: 4, 15: 4}    #check_high_low_exceedance의 래핑에 영향을 끼친다.
+        self.real_time_range: Dict[int, int] = {1: 6, 3: 2, 5: 4, 15: 4}    #check_high_low_exceedance의 래핑에 영향을 끼친다.
         
     def analysis_case1(self):
         # 가격 변동 트렌드를 확인하는 함수

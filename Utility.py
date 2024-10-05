@@ -19,7 +19,8 @@ class Utility(Analysis):
         self.account_balance: Dict[str, Dict[str, int | float]] = None
         self.check_balance_optimal: Tuple[bool, float] = None
         self.position_stopper: Dict[str, Dict[str, dict]]= {}
-        self.real_time_range: Dict[int, int] = {1: 3}#, 3: 2}
+        self.binance_account_info = None
+        # self.real_time_range: Dict[int, int] = {1: 3}#, 3: 2}
 
     def init_client(self, config_path: str = '/Volumes/SSD_256GB/C_U_AUT/API/binance.json') -> tuple:
         """Load API keys from a JSON configuration file."""
@@ -33,8 +34,8 @@ class Utility(Analysis):
     def get_account_balance(self, account_type: str = 'futures') -> dict:
         """Fetch account balance information for the specified account type."""
         if account_type == 'spot':
-            account_info = client.get_account()
-            balances = account_info.get('balances', [])
+            self.binance_account_info = client.get_account()
+            balances = self.binance_account_info.get('balances', [])
             
             account_data = {}
             for balance in balances:
@@ -51,8 +52,8 @@ class Utility(Analysis):
             return account_data
         
         elif account_type == 'futures':
-            account_info = client.futures_account()
-            assets = account_info.get('assets', [])
+            self.binance_account_info = client.futures_account()
+            assets = self.binance_account_info.get('assets', [])
             
             account_data = {}
             for asset in assets:
@@ -356,49 +357,6 @@ class Utility(Analysis):
         is_balance_sufficient = expected_balance >= required_balance
         return is_balance_sufficient, optimal_balance
 
-    ## ===== Original CODE ==== 240926
-    # async def _position_stopper(self, ratio: float = 0.7):
-    #     while True:
-    #         standard_ratio = 0.02
-            
-    #         # 큐에 데이터가 없으면 바로 처리하지 않도록 함
-    #         if not self.trade_data_queue:
-    #             await asyncio.sleep(5)
-    #             continue
-            
-    #         while self.position_stopper:
-    #             real_data = self.trade_data_queue[-1]
-                
-    #             for symbol, data in self.position_stopper.items():
-    #                 if symbol == real_data[0] and data['position'] == 'LONG':
-    #                     entryPrice = self.position_stopper[symbol]['EntryPrice']
-    #                     lastPrice = max(entryPrice, real_data[1])
-    #                     calculator_target = entryPrice + ratio * (lastPrice - entryPrice)
-    #                     targetPrice = min(calculator_target, lastPrice * (1 - standard_ratio))
-    #                     self.position_stopper[symbol]['LastPrice'] = lastPrice
-    #                     self.position_stopper[symbol]['TargetPrice'] = targetPrice
-
-    #                     # 목표가와 실시간 가격 비교
-    #                     if targetPrice > real_data[1]:
-    #                         self.close_position(symbol=symbol)
-    #                         del self.position_stopper[symbol]
-
-    #                 elif symbol == real_data[0] and data['position'] == 'SHORT':
-    #                     entryPrice = self.position_stopper[symbol]['EntryPrice']
-    #                     lastPrice = min(entryPrice, real_data[1])
-    #                     calculator_target = entryPrice - ratio * (entryPrice - lastPrice)
-    #                     targetPrice = max(calculator_target, lastPrice * (1 + standard_ratio))
-    #                     self.position_stopper[symbol]['LastPrice'] = lastPrice
-    #                     self.position_stopper[symbol]['TargetPrice'] = targetPrice
-
-    #                     # 목표가와 실시간 가격 비교
-    #                     if targetPrice < real_data[1]:
-    #                         self.close_position(symbol=symbol)
-    #                         del self.position_stopper[symbol]
-                
-    #             await asyncio.sleep(5)
-
-    ## ==== CHATGPT 개선코드 ====
     async def _position_stopper(self, ratio: float = 0.7):
         standard_ratio = 0.02
         
@@ -454,6 +412,22 @@ class Utility(Analysis):
     
             await asyncio.sleep(5)
 
+    async def _order_signal(self):
+        while True:
+            case1 = self.analysis_case1()
+
+            # === DEBUG ZONE ===
+            if case1 is not None:
+                for symbol in self.tickers:
+                    symbol = symbol.upper()
+                    for bool_ in [True, False]:
+                        case1_data = case1.get(symbol, {}).get(bool_, {})
+                        if case1_data != {}:
+                            position = {True:'LONG',
+                                        False:'SHORT'}.get(bool_)
+                            self.open_position(symbol=symbol, position=position)
+                await asyncio.sleep(5)
+                
 
 async def main():
     tickers = ['btcusdt', 'xrpusdt', 'solusdt', 'dogeusdt', 'hifiusdt', 'bnbusdt']
@@ -464,15 +438,11 @@ async def main():
     instance_.init_client(path)
     pprint(instance_.get_account_balance())
     
-    # instance_.close_position(symbol='all')
-    # time.sleep(1)
     instance_.set_margin_leverage(symbol=tickers[3], leverage=1)
     instance_.open_position(position='short', symbol=tickers[1])
     instance_.open_position(position='short', symbol=tickers[1])
     instance_.get_account_balance()
     pprint(instance_.position_stopper)
-
-    #asyncio.create_task(instance_.connect_websocket()),
     
     tasks = [asyncio.create_task(instance_.fetch_ohlcv_data()),
             asyncio.create_task(instance_.get_max_min_for_ranges()),
@@ -484,42 +454,3 @@ async def main():
 if __name__ == "__main__":
     nest_asyncio.apply()
     asyncio.run(main())
-
-    # handler = Analysis(tickers=tickers)
-    # pprint(handler.__dict__)
-    # print(tickers)
-    # print('START!')
-    # tasks = [
-    #     asyncio.create_task(handler.get_max_min_for_ranges()),
-    #     asyncio.create_task(handler.connect_websocket()),  # 웹소켓 연결
-    #     asyncio.create_task(handler.fetch_ohlcv_data()),   # OHLCV 데이터 가져오기
-    #     asyncio.create_task(handler.update_data_periodically()),  # 데이터 주기적 업데이트
-    #     asyncio.create_task(handler.case_print()),
-    # ]
-
-
-    
-    
-    
-    # tickers = ['btcusdt', 'xrpusdt', 'solusdt', 'dogeusdt', 'hifiusdt', 'bnbusdt']
-    # dummy_instance = Utility(tickers=tickers)
-    # dummy_instance.init_client()
-    # dummy_instance.get_account_balance()
-    # symbols = ['xrpUSDT', 'adausdt', 'loomusdt', 'dogeusdt', 'eosusdt']
-    
-    # pprint(dummy_instance.__dict__)
-    
-    # for symbol in symbols:
-    #     dummy_instance.set_margin_leverage(symbol=symbol, leverage=5, margin_type='isolated')
-    #     dummy_instance.open_position(symbol=symbol, position='short')
-
-    
-    
-    # # print(dummy_instance.check_optimal_balance())
-    # # dummy_instance.open_position(symbol='loomusdt', position='long')
-    # # time.sleep(1)
-    # dummy_instance.close_position(symbol='loomusdt')
-    # # dummy_instance.place_market_order(symbol=symbols[-1], side='buy', quantity=77)
-    # # pprint(dummy_instance.account_balance)
-    
-    
