@@ -2,7 +2,7 @@ import Utility
 import os
 from pprint import pprint
 
-path = '/Users/nnn/Desktop/API/binance.json'
+path = '/Volumes/TEST_ZONE/API/binance.json'
 tickers = ['xrpusdt', 'adausdt', 'dogeusdt']
 
 u = Utility.Utility(tickers)

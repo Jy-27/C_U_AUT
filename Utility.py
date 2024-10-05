@@ -192,10 +192,10 @@ class Utility(Analysis):
         get_account_balance를 기준하여 position open 처리하려 하였으나,
         통신 시간의 차이에 따른 즉시 기준잡을 데이터가 없음. 이에 따른 기준점 생성.
         """
-        # 기본적으로 모든 키에 대해 True로 설정
-        if not self.isPending:
-            for key in self.account_balance.keys():
-                self.isPending[key] = True
+        # 기본적으로 모든 키에 대해 False로 설정
+        if self.isPending:
+            for key in self.isPending.keys():
+                self.isPending[key] = False
         else:
             # 키가 있는 경우에 대해서만 True로 설정, 없는 경우 False로 설정
             for key in self.account_balance.keys():
@@ -203,7 +203,7 @@ class Utility(Analysis):
 
         return self.isPending
 
-    async def place_market_order(self, symbol: str, position: str, quantity: float, reduce: bool=False):
+    def place_market_order(self, symbol: str, position: str, quantity: float, reduce: bool=False):
         """
             symbol : 쌍거래 Ticker정보, 
             position : 'LONG', 'SHORT',
@@ -228,7 +228,7 @@ class Utility(Analysis):
             
             self.isPending[symbol] = not reduce
             self.get_account_balance()
-            await asyncio.sleep(0.5)
+            
             if reduce:
                 entry_price = self.account_balance.get(symbol, {}).get('entryPrice')
                 self.position_stopper[symbol] = {'entryPrice':entry_price,
@@ -237,13 +237,13 @@ class Utility(Analysis):
             elif not reduce:
                 if self.position_stopper:
                     self.position_stopper[symbol] = None
-            self.check_balance_optimal = self.check_balance_and_calculate_optimal(balance_ratio=0.4)
+            self.check_balance_optimal = self.check_optimal_balance(balance_ratio=0.4)
             return response
         
         except BinanceAPIException as e:
             print(f"An error occurred: {e}")
 
-    async def close_position(self, symbol: str='all'):
+    def close_position(self, symbol: str='all'):
         """
         특정 종목(symbol) 또는 전체(All) 포지션을 종료하는 함수
         symbol: 종목(symbol) 이름 또는 'ALL' (모든 포지션 종료)
@@ -286,11 +286,12 @@ class Utility(Analysis):
                 print("종료할 포지션이 없습니다.")
 
     def open_position(self, position: str, symbol: str):
+        symbol = symbol.upper()
         isPending = self.isPending.get(symbol, False)
-        self.check_balance_optimal = self.check_balance_and_calculate_optimal()
+        self.check_balance_optimal = self.check_optimal_balance()
         if not self.account_balance:
             self.get_account_balance()
-        if self.check_balance_optimal is not None and bool(self.check_balance_optimal[0]) and isPending:
+        if self.check_balance_optimal is not None and bool(self.check_balance_optimal[0]) and not isPending:
             Qty = self.get_minimum_quantity(symbol)
 
             "===== DEBUG ====="
@@ -300,7 +301,7 @@ class Utility(Analysis):
         else:
             print(f'설정 잔액 부족 {self.check_balance_optimal}')
             
-    def check_balance_and_calculate_optimal(self, balance_ratio: float = 0.45) -> tuple:
+    def check_optimal_balance(self, balance_ratio: float = 0.45) -> tuple:
         """
         잔액 확인과 최적의 잔액을 계산하여 현재 잔액이 요구되는 잔액 이상인지 확인.
         
@@ -514,7 +515,7 @@ if __name__ == "__main__":
 
     
     
-    # # print(dummy_instance.check_balance_and_calculate_optimal())
+    # # print(dummy_instance.check_optimal_balance())
     # # dummy_instance.open_position(symbol='loomusdt', position='long')
     # # time.sleep(1)
     # dummy_instance.close_position(symbol='loomusdt')
