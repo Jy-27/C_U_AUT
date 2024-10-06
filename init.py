@@ -23,7 +23,8 @@ async def main():
              asyncio.create_task(u.get_max_min_for_ranges()),
              asyncio.create_task(u.update_data_periodically()),
              asyncio.create_task(u._position_stopper()),
-             asyncio.create_task(u._order_signal())]
+             asyncio.create_task(u._order_signal()),
+             asyncio.create_task(u.case_print())]
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
